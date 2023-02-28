@@ -1,7 +1,7 @@
 import sqlite3
 
 class Database:
-    def __init__(self, file_name = 'invoices.db') -> None:
+    def __init__(self, file_name = 'database.db') -> None:
         # Connessione al database SQLite
         self.conn = sqlite3.connect(file_name, check_same_thread=False)
         self.c = self.conn.cursor()
