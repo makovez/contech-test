@@ -1,10 +1,13 @@
 import sqlite3
 
+TABLES = ['products', 'invoices', 'invoice_products']
+
 class Database:
     def __init__(self, file_name = 'database.db') -> None:
         # Connessione al database SQLite
         self.conn = sqlite3.connect(file_name, check_same_thread=False)
         self.c = self.conn.cursor()
+        self.initialize_db()
 
     def commit(self):
         self.conn.commit()
@@ -12,7 +15,13 @@ class Database:
     def initialize_db(self):
         # Inizializza il database creando le tabelle e aggiungendo alcuni prodotti di esempio
         self.create_tables()
-        self.add_sample_products()
+        self.commit()
+
+    def flush_tables(self):
+        # Drop each table, used for unittest
+        for table in TABLES:
+            self.c.execute(f"DELETE FROM {table};")
+
         self.commit()
 
     def create_tables(self):
@@ -36,6 +45,21 @@ class Database:
         self.c.execute("INSERT INTO products (name, price) VALUES ('Prodotto 1', 10.0)")
         self.c.execute("INSERT INTO products (name, price) VALUES ('Prodotto 2', 15.0)")
         self.c.execute("INSERT INTO products (name, price) VALUES ('Prodotto 3', 20.0)")
+
+        self.commit()
+
+    def add_sample_invoices(self):
+        self.add_sample_products() # Bisogna prima aggiungere i prodotti ovviamente
+        # Inserisce una nuova invoice sulla tabella invoices
+        self.c.execute("INSERT INTO invoices DEFAULT VALUES")
+        invoice_id = self.c.lastrowid
+
+        # Inserisce un  nuovo prodotto sulla tabella  'invoice_products'
+        products = [(1, 2), (3, 1)]  # Esempio product_id e quantity
+        for product_id, quantity in products:
+            self.c.execute("INSERT INTO invoice_products (invoice_id, product_id, quantity) VALUES (?, ?, ?)", (invoice_id, product_id, quantity))
+
+        self.commit()
 
     def execute_safe_query(self, query, params=None, include_params=False):
         if include_params:
@@ -84,7 +108,7 @@ class Database:
         :param product_id: (opzionale) l'ID del prodotto da cercare. Se non specificato, verranno restituiti tutti i prodotti.
         :return: una lista di dizionari contenente le informazioni sui prodotti, con le seguenti chiavi: 'id', 'name', 'price'
         """
-        # Recupero di tutti i prodotti dal database
+
         self.execute_safe_query(
             "SELECT * FROM products "
             "{0}".format('WHERE id = ?' if product_id else ''),
@@ -92,24 +116,21 @@ class Database:
         
         products = self.c.fetchall()
 
-        # Aggiungo le chiavi ai prodotti
         result = []
         for product in products:
             result.append({'id': product[0], 'name': product[1], 'price': product[2]})
 
         return result
     
-    def update_product(self, product_id, data):
+    def update_product(self, product_id, name, price):
         """
         Update a product in the database with the given product_id and data.
         :param product_id: The id of the product to update.
         :param data: A dictionary containing the updated data for the product.
                     The dictionary can contain the keys 'name' and/or 'price'.
         """
-        # Update product fields in the database based on the provided data
-        set_clause = ", ".join([f"{key}=? " for key in data.keys()])
-        values = tuple(data.values()) + (product_id,)
-        self.c.execute(f"UPDATE products SET {set_clause} WHERE id=?", values)
+        values = (name, price, product_id)
+        self.c.execute(f"UPDATE products SET name = ?, price = ?  WHERE id= ?", values)
         self.conn.commit()
 
 
@@ -155,7 +176,7 @@ class Database:
         :param invoice_id: l'ID della fattura da cercare (opzionale)
         :return: la lista di dizionari contenenti le informazioni sulle fatture
         """
-        self.execute_safe_query("SELECT invoices.id, invoices.date, SUM(products.price * invoice_products.quantity) as total, products.name, invoice_products.quantity, products.price, "
+        self.execute_safe_query("SELECT invoices.id, invoices.date, products.name, invoice_products.quantity, products.price, "
                         "invoice_products.quantity * products.price as subtotal "
                         "FROM invoices "
                         "JOIN invoice_products ON invoices.id = invoice_products.invoice_id "
@@ -165,10 +186,14 @@ class Database:
                         params=(invoice_id,), include_params=bool(invoice_id))
         rows = self.c.fetchall()
         invoices = []
-        for invoice_id, date, total, *products_data in rows:
+        for invoice_id, date, *products_data in rows:
             if not invoices or invoices[-1]['id'] != invoice_id:
-                invoices.append({'id': invoice_id, 'date': date, 'products': [], 'total':total})
+                invoices.append({'id': invoice_id, 'date': date, 'products': [], 'total':-1})
             product = dict(zip(('name', 'quantity', 'price', 'subtotal'), products_data))
             invoices[-1]['products'].append(product)
+
+        for pos, invoice in enumerate(invoices):
+            total = sum(product['subtotal'] for product in invoice['products'])
+            invoices[pos]['total'] = total
 
         return invoices
