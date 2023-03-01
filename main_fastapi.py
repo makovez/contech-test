@@ -1,5 +1,4 @@
 import uvicorn
-
 from core.fastapi import app
 
 if __name__ == '__main__':
